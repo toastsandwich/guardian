@@ -1,6 +1,7 @@
 package guardian
 
 import (
+	"encoding/binary"
 	"net"
 	"sync/atomic"
 
@@ -10,8 +11,6 @@ import (
 )
 
 const pinPath = "/sys/fs/bpf/guardian"
-
-type be32 = uint32
 
 type Guardian struct {
 	IfaceName string
@@ -29,6 +28,33 @@ func New(ifaceName string) *Guardian {
 	}
 }
 
+type ShowResult struct {
+	IP      string
+	Allowed bool
+}
+
+func (g *Guardian) show(ch chan ShowResult) {
+	var ip uint32
+	var allowed bool
+	iter := g.guardianMap.Iterate()
+	for iter.Next(&ip, &allowed) {
+		ipbuf := make([]byte, 4)
+		binary.BigEndian.PutUint32(ipbuf, ip)
+
+		ch <- ShowResult{
+			IP:      net.IP(ipbuf).String(),
+			Allowed: allowed,
+		}
+	}
+	close(ch)
+}
+
+func (g *Guardian) Show() chan ShowResult {
+	ch := make(chan ShowResult)
+	go g.show(ch)
+	return ch
+}
+
 func (g *Guardian) Attach() error {
 	err := rlimit.RemoveMemlock()
 	if err != nil {
@@ -41,7 +67,7 @@ func (g *Guardian) Attach() error {
 		return err
 	}
 	g.obj = &obj
-
+	g.guardianMap = obj.guardianMaps.GuardianM
 	iface, err := net.InterfaceByName(g.IfaceName)
 	if err != nil {
 		return err

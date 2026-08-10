@@ -83,3 +83,33 @@ func AttachDial(r Request) Response {
 	}
 	return resp
 }
+
+func ShowDial(r Request) Response {
+	conn, err := net.Dial("unix", Path)
+	if err != nil {
+		return Response{Error: err}
+	}
+	defer conn.Close()
+
+	b, err := json.Marshal(&r)
+	if err != nil {
+		return Response{Error: err}
+	}
+
+	_, err = conn.Write(b)
+	if err != nil {
+		return Response{Error: err}
+	}
+
+	res := make([]byte, 1024)
+	n, err := conn.Read(res)
+	if err != nil {
+		return Response{Error: err}
+	}
+	resp := Response{}
+	err = json.Unmarshal(res[:n], &resp)
+	if err != nil {
+		return Response{Error: err}
+	}
+	return resp
+}

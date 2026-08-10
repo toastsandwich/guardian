@@ -10,6 +10,7 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(pingCmd)
+	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(stopCmd)
 }
 

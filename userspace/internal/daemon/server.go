@@ -21,6 +21,8 @@ type Command byte
 const (
 	Ping   Command = 0x00
 	Attach Command = 0x01
+	Detach Command = 0x02
+	Show   Command = 0x03
 	Stop   Command = 0xFF
 )
 
@@ -38,8 +40,9 @@ type Request struct {
 }
 
 type Response struct {
-	Status Status `json:"status"`
-	Error  error  `json:"error,omitempty"`
+	Status Status       `json:"status"`
+	Ips    []ShowResult `json:"ips"`
+	Error  error        `json:"error,omitempty"`
 }
 
 type Server struct {
@@ -94,60 +97,70 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	for {
-		b := make([]byte, 1024)
-		n, err := conn.Read(b)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			s.log.Error("failed to read from connection", "ERR", err)
-			continue
-		}
-		r := Request{}
-		err = json.Unmarshal(b[:n], &r)
-		if err != nil {
-			s.log.Error("failed to unmarshal incoming request", "ERR", err)
-			continue
-		}
-		switch r.Command {
-		case Ping:
-			res, _ := HandlePing(nil)
-			b, err := json.Marshal(&res)
-			if err != nil {
-				s.log.Error("failed to marshal ping response", "ERR", err)
-			}
-			_, err = conn.Write(b)
-			if err != nil {
-				s.log.Error("failed to write ping response to client", "ERR", err)
-			}
-		case Attach:
-			resp, err := s.HandleAttach(&r)
-			if err != nil {
-				s.log.Error("failed to handle attach request", "ERR", err)
-			}
-			b, err := json.Marshal(resp)
-			if err != nil {
-				s.log.Error("failed to marshal response", "ERR", err)
-			}
-
-			_, err = conn.Write(b)
-			if err != nil {
-				s.log.Error("failed to write attach response to client", "ERR", err)
-			}
-			return
-
-		case Stop:
-			if g := s.guardian.Load(); g != nil {
-				if err := g.Close(); err != nil {
-					s.log.Error("failed to close guardian", "ERR", err)
-					// still shut down the server; pin/link best-effort already done in Close
-				}
-				s.guardian.Store(nil)
-			}
-			s.Close()
+	b := make([]byte, 1024)
+	n, err := conn.Read(b)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
 			return
 		}
+		s.log.Error("failed to read from connection", "ERR", err)
+		return
+	}
+	r := Request{}
+	err = json.Unmarshal(b[:n], &r)
+	if err != nil {
+		s.log.Error("failed to unmarshal incoming request", "ERR", err)
+		return
+	}
+	switch r.Command {
+	case Ping:
+		res, _ := HandlePing(nil)
+		b, err := json.Marshal(&res)
+		if err != nil {
+			s.log.Error("failed to marshal ping response", "ERR", err)
+		}
+		_, err = conn.Write(b)
+		if err != nil {
+			s.log.Error("failed to write ping response to client", "ERR", err)
+		}
+	case Attach:
+		resp, err := s.HandleAttach(&r)
+		if err != nil {
+			s.log.Error("failed to handle attach request", "ERR", err)
+		}
+		b, err := json.Marshal(resp)
+		if err != nil {
+			s.log.Error("failed to marshal response", "ERR", err)
+		}
+
+		_, err = conn.Write(b)
+		if err != nil {
+			s.log.Error("failed to write attach response to client", "ERR", err)
+		}
+		return
+
+	case Show:
+		resp := s.HandleShow()
+		b, err := json.Marshal(resp)
+		if err != nil {
+			s.log.Error("failed to marshal response", "ERR", err)
+		}
+
+		_, err = conn.Write(b)
+		if err != nil {
+			s.log.Error("failed to write attach response to client", "ERR", err)
+		}
+		return
+
+	case Stop:
+		if g := s.guardian.Load(); g != nil {
+			if err := g.Close(); err != nil {
+				s.log.Error("failed to close guardian", "ERR", err)
+			}
+			s.guardian.Store(nil)
+		}
+		s.Close()
+		return
 	}
 }
 
