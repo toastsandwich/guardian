@@ -8,9 +8,10 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(attachCmd)
+	rootCmd.AddCommand(detachCmd)
 	rootCmd.AddCommand(startCmd)
-	rootCmd.AddCommand(pingCmd)
-	rootCmd.AddCommand(showCmd)
+	// rootCmd.AddCommand(pingCmd)
+	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(stopCmd)
 }
 

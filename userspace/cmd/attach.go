@@ -20,18 +20,19 @@ var attachCmd = &cobra.Command{
 			return fmt.Errorf("--to flag required")
 		}
 
-		resp := daemon.AttachDial(daemon.Request{
-			Command:   daemon.Attach,
+		code, err := daemon.DialAttach(daemon.AttachOptions{
 			IfaceName: to,
 		})
-
-		if resp.Status == daemon.StatusAttached {
-			fmt.Println("attached")
-		} else {
-			fmt.Println("something went wrong check logs")
+		if err != nil {
+			return err
 		}
 
-		return resp.Error
+		if code == daemon.CodeOK {
+			fmt.Println("attached")
+			return nil
+		}
+		fmt.Println("something went wrong check logs")
+		return nil
 	},
 }
 

@@ -1,171 +1,108 @@
 package daemon
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
-	"sync/atomic"
-
-	"github.com/toastsandwich/guardian/internal/guardian"
 )
 
-const (
-	Path = "/tmp/guardian.sock"
-)
-
-type Command byte
-
-const (
-	Ping   Command = 0x00
-	Attach Command = 0x01
-	Detach Command = 0x02
-	Show   Command = 0x03
-	Stop   Command = 0xFF
-)
-
-type Status byte
-
-const (
-	StatusOK       Status = 0x00
-	StatusAttached Status = 0x01
-	StatusClosed   Status = 0x0F
-)
-
-type Request struct {
-	Command   Command `json:"command"`
-	IfaceName string  `json:"iface_name"`
-}
-
-type Response struct {
-	Status Status       `json:"status"`
-	Ips    []ShowResult `json:"ips"`
-	Error  error        `json:"error,omitempty"`
-}
+const path = "/tmp/guardian.sock"
 
 type Server struct {
-	log *slog.Logger
+	ln   net.Listener
+	exec *Executor
 
-	guardian atomic.Pointer[guardian.Guardian]
+	logger *slog.Logger
 
-	isClosed atomic.Bool
-	doneCh   chan struct{}
+	isStarted bool
 }
 
 func NewServer() *Server {
-	th := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-
-	s := &Server{
-		log:    slog.New(th),
-		doneCh: make(chan struct{}),
-	}
-
-	return s
+	ex := NewEmpty()
+	ex.Init()
+	return &Server{exec: ex, logger: slog.Default()}
 }
 
-func (s *Server) ListenAndServe() error {
-	_ = os.Remove(Path)
+func (s *Server) Start() error {
+	if s.isStarted {
+		return fmt.Errorf("guardian already started")
+	}
+	_ = os.Remove(path) // precaution
 
-	ln, err := net.Listen("unix", Path)
+	s.logger.Info("starting listener ...")
+	ln, err := net.Listen("unix", path)
 	if err != nil {
 		return err
 	}
-	defer ln.Close()
-
-	ul, ok := ln.(*net.UnixListener)
-	if ok {
+	if ul, ok := ln.(*net.UnixListener); ok {
 		ul.SetUnlinkOnClose(true)
 	}
-	slog.Info("listening for requests")
-	go func() {
-		for !s.isClosed.Load() {
-			conn, err := ln.Accept()
-			if err != nil {
-				s.log.Error("failed to accept incoming connection", "ERR", err)
+
+	s.isStarted = true
+	s.ln = ln
+	defer s.Close()
+
+	s.logger.Info("listener ready to accept connections.")
+	for {
+		conn, err := s.ln.Accept()
+		if err != nil {
+			if !s.isStarted {
+				return nil
 			}
-			s.handleConn(conn)
+			s.logger.Error("failed to accept connection", "ERR", err)
+			continue
 		}
-	}()
-	<-s.doneCh
-	return nil
+		if err := s.handleConn(conn); err != nil {
+			s.logger.Error("failed to handle connection", "ERR", err)
+		}
+		if !s.isStarted {
+			s.logger.Info("guardian stopped")
+			return nil
+		}
+	}
 }
 
-func (s *Server) handleConn(conn net.Conn) {
+func (s *Server) handleConn(c net.Conn) error {
+	conn := NewConn(c)
 	defer conn.Close()
 
-	b := make([]byte, 1024)
-	n, err := conn.Read(b)
+	req := Request{}
+	err := conn.Recieve(&req)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		s.log.Error("failed to read from connection", "ERR", err)
-		return
+		s.logger.Error("failed to receive request", "ERR", err)
+		return err
 	}
-	r := Request{}
-	err = json.Unmarshal(b[:n], &r)
+
+	execFn, err := s.exec.Do(req.Command)
 	if err != nil {
-		s.log.Error("failed to unmarshal incoming request", "ERR", err)
-		return
+		s.logger.Error("failed to find command handler", "ERR", err, "command", req.Command.String())
+		resp := Response{Code: CodeInternal}
+		if sendErr := conn.Send(&resp); sendErr != nil {
+			s.logger.Error("failed to send response", "ERR", sendErr)
+			return sendErr
+		}
+		return err
 	}
-	switch r.Command {
-	case Ping:
-		res, _ := HandlePing(nil)
-		b, err := json.Marshal(&res)
-		if err != nil {
-			s.log.Error("failed to marshal ping response", "ERR", err)
-		}
-		_, err = conn.Write(b)
-		if err != nil {
-			s.log.Error("failed to write ping response to client", "ERR", err)
-		}
-	case Attach:
-		resp, err := s.HandleAttach(&r)
-		if err != nil {
-			s.log.Error("failed to handle attach request", "ERR", err)
-		}
-		b, err := json.Marshal(resp)
-		if err != nil {
-			s.log.Error("failed to marshal response", "ERR", err)
-		}
 
-		_, err = conn.Write(b)
-		if err != nil {
-			s.log.Error("failed to write attach response to client", "ERR", err)
-		}
-		return
-
-	case Show:
-		resp := s.HandleShow()
-		b, err := json.Marshal(resp)
-		if err != nil {
-			s.log.Error("failed to marshal response", "ERR", err)
-		}
-
-		_, err = conn.Write(b)
-		if err != nil {
-			s.log.Error("failed to write attach response to client", "ERR", err)
-		}
-		return
-
-	case Stop:
-		if g := s.guardian.Load(); g != nil {
-			if err := g.Close(); err != nil {
-				s.log.Error("failed to close guardian", "ERR", err)
-			}
-			s.guardian.Store(nil)
-		}
-		s.Close()
-		return
+	resp, err := execFn(req)
+	if err != nil {
+		s.logger.Error("failed to execute command", "ERR", err, "command", req.Command.String())
 	}
+	if sendErr := conn.Send(&resp); sendErr != nil {
+		s.logger.Error("failed to send response", "ERR", sendErr)
+		return sendErr
+	}
+
+	if req.Command == StopCmd {
+		s.isStarted = false
+	}
+	return err
 }
 
 func (s *Server) Close() {
-	close(s.doneCh)
-
-	s.isClosed.Store(true)
+	s.isStarted = false
+	if s.ln != nil {
+		s.ln.Close()
+	}
 }
