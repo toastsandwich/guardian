@@ -28,20 +28,20 @@ func New(ifaceName string) *Guardian {
 	}
 }
 
-type ShowResult struct {
+type ListResult struct {
 	IP      string
 	Allowed bool
 }
 
-func (g *Guardian) show(ch chan ShowResult) {
+func (g *Guardian) list(ch chan ListResult) {
 	var ip uint32
 	var allowed bool
 	iter := g.guardianMap.Iterate()
 	for iter.Next(&ip, &allowed) {
 		ipbuf := make([]byte, 4)
-		binary.BigEndian.PutUint32(ipbuf, ip)
+		binary.LittleEndian.PutUint32(ipbuf, ip)
 
-		ch <- ShowResult{
+		ch <- ListResult{
 			IP:      net.IP(ipbuf).String(),
 			Allowed: allowed,
 		}
@@ -49,9 +49,9 @@ func (g *Guardian) show(ch chan ShowResult) {
 	close(ch)
 }
 
-func (g *Guardian) Show() chan ShowResult {
-	ch := make(chan ShowResult)
-	go g.show(ch)
+func (g *Guardian) List() chan ListResult {
+	ch := make(chan ListResult)
+	go g.list(ch)
 	return ch
 }
 
@@ -85,30 +85,36 @@ func (g *Guardian) Attach() error {
 }
 
 func (g *Guardian) Dettach() error {
+	if g == nil || g.lnk == nil {
+		return nil
+	}
 	return g.lnk.Detach()
 }
 
 func (g *Guardian) Close() error {
-	if !g.isClosed.Load() {
-		g.isClosed.Store(true)
-		err := g.lnk.Unpin()
-		if err != nil {
+	if g == nil || g.isClosed.Load() {
+		return nil
+	}
+	g.isClosed.Store(true)
+
+	if g.lnk != nil {
+		if err := g.lnk.Unpin(); err != nil {
 			return err
 		}
-		err = g.Dettach()
-		if err != nil {
+		if err := g.Dettach(); err != nil {
 			return err
 		}
-		err = g.lnk.Close()
-		if err != nil {
+		if err := g.lnk.Close(); err != nil {
 			return err
 		}
-		err = g.guardianMap.Close()
-		if err != nil {
+	}
+	if g.guardianMap != nil {
+		if err := g.guardianMap.Close(); err != nil {
 			return err
 		}
-		err = g.obj.Close()
-		if err != nil {
+	}
+	if g.obj != nil {
+		if err := g.obj.Close(); err != nil {
 			return err
 		}
 	}
