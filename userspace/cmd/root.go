@@ -12,6 +12,8 @@ func init() {
 	rootCmd.AddCommand(startCmd)
 	// rootCmd.AddCommand(pingCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(allowCmd)
+	rootCmd.AddCommand(denyCmd)
 	rootCmd.AddCommand(stopCmd)
 }
 

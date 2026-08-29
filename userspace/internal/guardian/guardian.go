@@ -10,7 +10,14 @@ import (
 	"github.com/cilium/ebpf/rlimit"
 )
 
-const pinPath = "/sys/fs/bpf/guardian"
+const (
+	pinPath = "/sys/fs/bpf/guardian"
+)
+
+var (
+	allow byte = 1
+	deny  byte = 0
+)
 
 type Guardian struct {
 	IfaceName string
@@ -26,6 +33,26 @@ func New(ifaceName string) *Guardian {
 	return &Guardian{
 		IfaceName: ifaceName,
 	}
+}
+
+func (g *Guardian) Allow(ip string) error {
+	b := net.ParseIP(ip)
+	be := binary.LittleEndian.Uint32(b.To4())
+	err := g.guardianMap.Update(&be, &allow, ebpf.UpdateAny)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (g *Guardian) Deny(ip string) error {
+	b := net.ParseIP(ip)
+	be := binary.LittleEndian.Uint32(b.To4())
+	err := g.guardianMap.Update(&be, &deny, ebpf.UpdateAny)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 type ListResult struct {

@@ -1,2 +1,2 @@
 build:
-	go build -o guardian cmd/*.go
+	go build -o cli cmd/*.go

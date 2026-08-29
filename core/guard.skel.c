@@ -91,8 +91,7 @@ int guardian(struct xdp_md *ctx) {
     }
     ok = *(__u8 *)(value);
     if (!ok) {
-      bpf_printk("dropping packet because %pI4 was blacklisted",
-                 bpf_ntohl(saddr));
+      bpf_printk("dropping packet because %pI4 was blacklisted", &saddr);
       action = XDP_DROP;
       goto end;
     }
