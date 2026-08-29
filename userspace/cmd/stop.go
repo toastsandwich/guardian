@@ -16,7 +16,7 @@ var stopCmd = &cobra.Command{
 			return err
 		}
 		if code != daemon.CodeOK {
-			fmt.Println("something went wrong check logs")
+			fmt.Println("something went wrong check guardian logs")
 			return nil
 		}
 		fmt.Println("detached and stopped")

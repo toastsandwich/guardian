@@ -134,9 +134,68 @@ func DialList(b *strings.Builder, lo ListOptions) (int, error) {
 	}
 	tw.Flush()
 
-	return CodeOK, nil
+	return int(res.Code), nil
 }
 
-func ExecDeny(r Request) (Response, error) {
-	return Response{}, nil
+func DialDeny(do DenyOptions) (int, error) {
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return -1, err
+	}
+
+	c := NewConn(conn)
+	defer c.Close()
+
+	buf, err := json.Marshal(&do)
+	if err != nil {
+		return -1, err
+	}
+
+	req := Request{
+		Command: DenyCmd,
+		Body:    buf,
+	}
+	err = c.Send(&req)
+	if err != nil {
+		return -1, err
+	}
+
+	resp := Response{}
+	err = c.Recieve(&resp)
+	if err != nil {
+		return -1, err
+	}
+	return int(resp.Code), nil
+}
+
+func DialAllow(ao AllowOptions) (int, error) {
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return -1, err
+	}
+
+	c := NewConn(conn)
+	defer c.Close()
+
+	buf, err := json.Marshal(&ao)
+	if err != nil {
+		return -1, err
+	}
+
+	req := Request{
+		Command: AllowCmd,
+		Body:    buf,
+	}
+	err = c.Send(&req)
+	if err != nil {
+		return -1, err
+	}
+
+	resp := Response{}
+	err = c.Recieve(&resp)
+	if err != nil {
+		return -1, err
+	}
+	return int(resp.Code), nil
+
 }
