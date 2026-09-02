@@ -2,200 +2,131 @@ package daemon
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
-	"strings"
-	"text/tabwriter"
 )
 
-func DialAttach(ao AttachOptions) (int, error) {
-	buf, err := json.Marshal(&ao)
-	if err != nil {
-		return -1, err
+type Client struct {
+	Path string
+}
+
+func NewClient() *Client {
+	return &Client{}
+}
+
+func (c *Client) socketPath() string {
+	if c != nil && c.Path != "" {
+		return c.Path
 	}
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return -1, err
+	return path
+}
+
+func (c *Client) call(cmd Command, body any) (Response, error) {
+	var buf []byte
+	if body != nil {
+		var err error
+		buf, err = json.Marshal(body)
+		if err != nil {
+			return Response{}, err
+		}
 	}
 
-	c := NewConn(conn)
-	defer c.Close()
+	conn, err := net.Dial("unix", c.socketPath())
+	if err != nil {
+		return Response{}, err
+	}
+	dc := NewConn(conn)
+	defer dc.Close()
 
-	err = c.Send(&Request{
+	err = dc.Send(&Request{
 		Version: byte(0),
-		Command: AttachCmd,
+		Command: cmd,
 		Body:    buf,
 	})
 	if err != nil {
-		return -1, err
+		return Response{}, err
 	}
 
 	resp := Response{}
-	err = c.Recieve(&resp)
-	if err != nil {
-		return -1, err
+	if err := dc.Receive(&resp); err != nil {
+		return Response{}, err
 	}
-	return int(resp.Code), nil
+	return resp, nil
 }
 
-func DialDetach() (int, error) {
-	conn, err := net.Dial("unix", path)
+func (c *Client) Attach(ao AttachOptions) (byte, error) {
+	resp, err := c.call(AttachCmd, ao)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
-
-	c := NewConn(conn)
-	defer c.Close()
-
-	err = c.Send(&Request{
-		Command: DettachCmd,
-	})
-	if err != nil {
-		return -1, err
-	}
-
-	resp := Response{}
-	err = c.Recieve(&resp)
-	if err != nil {
-		return -1, err
-	}
-	return int(resp.Code), nil
+	return resp.Code, nil
 }
 
-func DialStop() (int, error) {
-	conn, err := net.Dial("unix", path)
+func (c *Client) Detach() (byte, error) {
+	resp, err := c.call(DettachCmd, nil)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
-
-	c := NewConn(conn)
-	defer c.Close()
-
-	err = c.Send(&Request{
-		Command: StopCmd,
-	})
-	if err != nil {
-		return -1, err
-	}
-
-	resp := Response{}
-	err = c.Recieve(&resp)
-	if err != nil {
-		return -1, err
-	}
-	return int(resp.Code), nil
+	return resp.Code, nil
 }
 
-func DialList(b *strings.Builder, lo ListOptions) (int, error) {
-	conn, err := net.Dial("unix", path)
+func (c *Client) Stop() (byte, error) {
+	resp, err := c.call(StopCmd, nil)
 	if err != nil {
-		return -1, err
+		return 0, err
+	}
+	return resp.Code, nil
+}
+
+func (c *Client) Allow(ao AllowOptions) (byte, error) {
+	resp, err := c.call(AllowCmd, ao)
+	if err != nil {
+		return 0, err
+	}
+	return resp.Code, nil
+}
+
+func (c *Client) Deny(do DenyOptions) (byte, error) {
+	resp, err := c.call(DenyCmd, do)
+	if err != nil {
+		return 0, err
+	}
+	return resp.Code, nil
+}
+
+func (c *Client) GetMode() (string, byte, error) {
+	resp, err := c.call(GetModeCmd, nil)
+	if err != nil {
+		return "", 0, err
 	}
 
-	c := NewConn(conn)
-	defer c.Close()
-
-	rb, err := json.Marshal(&lo)
-	if err != nil {
-		return -1, err
+	mr := ModeResp{}
+	if len(resp.Body) > 0 {
+		if err := json.Unmarshal(resp.Body, &mr); err != nil {
+			return "", resp.Code, err
+		}
 	}
+	return mr.Mode, resp.Code, nil
+}
 
-	err = c.Send(&Request{
-		Command: ListCmd,
-		Body:    rb,
-	})
+func (c *Client) SetMode(so SetModeOptions) (byte, error) {
+	resp, err := c.call(SetModeCmd, so)
+	if err != nil {
+		return 0, err
+	}
+	return resp.Code, nil
+}
+
+func (c *Client) List(lo ListOptions) (ListResp, byte, error) {
+	resp, err := c.call(ListCmd, lo)
+	if err != nil {
+		return ListResp{}, 0, err
+	}
 
 	ips := ListResp{}
-	res := Response{}
-	err = c.Recieve(&res)
-	if err != nil {
-		return -1, nil
-	}
-
-	err = json.Unmarshal(res.Body, &ips)
-	if err != nil {
-		return -1, err
-	}
-
-	status := func(p bool) string {
-		if p {
-			return "Allowed"
+	if len(resp.Body) > 0 {
+		if err := json.Unmarshal(resp.Body, &ips); err != nil {
+			return ListResp{}, resp.Code, err
 		}
-		return "Denied"
 	}
-	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "\nIP\tSTATUS")
-	fmt.Fprintln(tw, "--\t------")
-	for _, ip := range ips.IPs {
-		fmt.Fprintf(
-			tw,
-			"%s\t%s\n", ip.IP, status(ip.Allow),
-		)
-	}
-	tw.Flush()
-
-	return int(res.Code), nil
-}
-
-func DialDeny(do DenyOptions) (int, error) {
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return -1, err
-	}
-
-	c := NewConn(conn)
-	defer c.Close()
-
-	buf, err := json.Marshal(&do)
-	if err != nil {
-		return -1, err
-	}
-
-	req := Request{
-		Command: DenyCmd,
-		Body:    buf,
-	}
-	err = c.Send(&req)
-	if err != nil {
-		return -1, err
-	}
-
-	resp := Response{}
-	err = c.Recieve(&resp)
-	if err != nil {
-		return -1, err
-	}
-	return int(resp.Code), nil
-}
-
-func DialAllow(ao AllowOptions) (int, error) {
-	conn, err := net.Dial("unix", path)
-	if err != nil {
-		return -1, err
-	}
-
-	c := NewConn(conn)
-	defer c.Close()
-
-	buf, err := json.Marshal(&ao)
-	if err != nil {
-		return -1, err
-	}
-
-	req := Request{
-		Command: AllowCmd,
-		Body:    buf,
-	}
-	err = c.Send(&req)
-	if err != nil {
-		return -1, err
-	}
-
-	resp := Response{}
-	err = c.Recieve(&resp)
-	if err != nil {
-		return -1, err
-	}
-	return int(resp.Code), nil
-
+	return ips, resp.Code, nil
 }

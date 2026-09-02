@@ -17,7 +17,9 @@ import (
 // Used for safe lookups in a Collection or CollectionSpec.
 const (
 	guardianMapGuardianM = "guardian_m"
+	guardianMapModeMap   = "mode_map"
 	guardianProgGuardian = "guardian"
+	guardianVarMODE      = "MODE"
 )
 
 // loadGuardian returns the embedded CollectionSpec for guardian.
@@ -70,12 +72,14 @@ type guardianProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type guardianMapSpecs struct {
 	GuardianM *ebpf.MapSpec `ebpf:"guardian_m"`
+	ModeMap   *ebpf.MapSpec `ebpf:"mode_map"`
 }
 
 // guardianVariableSpecs contains global variables before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type guardianVariableSpecs struct {
+	MODE *ebpf.VariableSpec `ebpf:"MODE"`
 }
 
 // guardianObjects contains all objects after they have been loaded into the kernel.
@@ -99,11 +103,13 @@ func (o *guardianObjects) Close() error {
 // It can be passed to loadGuardianObjects or ebpf.CollectionSpec.LoadAndAssign.
 type guardianMaps struct {
 	GuardianM *ebpf.Map `ebpf:"guardian_m"`
+	ModeMap   *ebpf.Map `ebpf:"mode_map"`
 }
 
 func (m *guardianMaps) Close() error {
 	return _GuardianClose(
 		m.GuardianM,
+		m.ModeMap,
 	)
 }
 
@@ -111,6 +117,7 @@ func (m *guardianMaps) Close() error {
 //
 // It can be passed to loadGuardianObjects or ebpf.CollectionSpec.LoadAndAssign.
 type guardianVariables struct {
+	MODE *ebpf.Variable `ebpf:"MODE"`
 }
 
 // guardianPrograms contains all programs after they have been loaded into the kernel.
