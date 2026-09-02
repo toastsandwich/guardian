@@ -4,6 +4,8 @@
 
 #define ETH_P_IP 0x0800
 
+const __u8 MODE = 1;
+
 // parser_t will contain the start pointer to the packet
 struct parser_t {
   void *offset;
@@ -41,6 +43,13 @@ static __always_inline int parse_iphdr(struct parser_t *parser, void *data_end,
   return (*ptr)->tot_len;
 }
 
+struct {
+  __uint(type, BPF_MAP_TYPE_HASH);
+  __type(key, __u8);
+  __type(value, __u8);
+  __uint(max_entries, 1);
+} mode_map SEC(".maps");
+
 // map to contain blacklisted ips
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
@@ -63,8 +72,17 @@ int guardian(struct xdp_md *ctx) {
 
   static __u8 allowed;
 
-  action        = XDP_PASS;
-  allowed       = 1;
+  static __u8 mode = 1;
+  void       *mode_raw;
+  mode_raw = bpf_map_lookup_elem(&mode_map, &MODE);
+  if (mode_raw) {
+    mode = *(__u8 *)(mode_raw);
+  }
+  action = XDP_PASS;
+  // check the guardian mode
+  // SENTRY = 0;
+  // MONK = 1;
+  allowed       = mode & 1;
   data          = (void *)(long)(ctx->data);
   data_end      = (void *)(long)(ctx->data_end);
   parser.offset = data;
