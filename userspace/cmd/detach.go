@@ -11,7 +11,7 @@ var detachCmd = &cobra.Command{
 	Use:   "detach",
 	Short: "detach guardian from the interface",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		code, err := daemon.DialDetach()
+		code, err := daemon.NewClient().Detach()
 		if err != nil {
 			return err
 		}

@@ -2,7 +2,10 @@ package guardian
 
 import (
 	"encoding/binary"
+	"fmt"
+	"iter"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"github.com/cilium/ebpf"
@@ -12,19 +15,54 @@ import (
 
 const (
 	pinPath = "/sys/fs/bpf/guardian"
+	monk    = "monk"
+	sentry  = "sentry"
 )
 
 var (
 	allow byte = 1
 	deny  byte = 0
+
+	modeKey byte = 1
 )
+
+type Mode byte
+
+func (m Mode) toByte() byte {
+	return byte(m)
+}
+
+func (m Mode) String() string {
+	switch m {
+	case 1:
+		return monk
+	case 0:
+		return sentry
+	default:
+		return "unkown"
+	}
+}
+
+func DetermineMode(mode string) (Mode, error) {
+	switch strings.ToLower(mode) {
+	case monk:
+		return 1, nil
+	case sentry:
+		return 0, nil
+	default:
+		return 255, fmt.Errorf("unkown mode")
+	}
+}
 
 type Guardian struct {
 	IfaceName string
 
 	obj         *guardianObjects
 	guardianMap *ebpf.Map
+	modeMap     *ebpf.Map
 	lnk         link.Link
+
+	modeKey byte
 
 	isClosed atomic.Bool
 }
@@ -76,13 +114,38 @@ func (g *Guardian) list(ch chan ListResult) {
 	close(ch)
 }
 
-func (g *Guardian) List() chan ListResult {
+func (g *Guardian) List() iter.Seq[ListResult] {
 	ch := make(chan ListResult)
 	go g.list(ch)
-	return ch
+
+	return func(yield func(ListResult) bool) {
+		for lr := range ch {
+			if !yield(lr) {
+				break
+			}
+		}
+	}
 }
 
-func (g *Guardian) Attach() error {
+func (g *Guardian) GetMode() (string, error) {
+	var m byte
+	err := g.modeMap.Lookup(&g.modeKey, &m)
+	if err != nil {
+		return "", err
+	}
+	return Mode(m).String(), nil
+}
+
+func (g *Guardian) SetMode(mode Mode) error {
+	m := mode.toByte()
+	err := g.modeMap.Update(&g.modeKey, &m, ebpf.UpdateExist)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (g *Guardian) Attach(mode Mode) error {
 	err := rlimit.RemoveMemlock()
 	if err != nil {
 		return err
@@ -95,7 +158,20 @@ func (g *Guardian) Attach() error {
 	}
 	g.obj = &obj
 	g.guardianMap = obj.guardianMaps.GuardianM
+	g.modeMap = obj.guardianMaps.ModeMap
 	iface, err := net.InterfaceByName(g.IfaceName)
+	if err != nil {
+		return err
+	}
+
+	modeKey := byte(0)
+	if err := obj.guardianVariables.MODE.Get(&modeKey); err != nil {
+		return err
+	}
+
+	g.modeKey = modeKey
+	modeVal := mode.toByte()
+	err = g.modeMap.Put(&modeKey, &modeVal)
 	if err != nil {
 		return err
 	}
@@ -137,6 +213,11 @@ func (g *Guardian) Close() error {
 	}
 	if g.guardianMap != nil {
 		if err := g.guardianMap.Close(); err != nil {
+			return err
+		}
+	}
+	if g.modeMap != nil {
+		if err := g.modeMap.Close(); err != nil {
 			return err
 		}
 	}

@@ -16,7 +16,7 @@ Currently only ipv4 is supported.
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ip := args[0]
-		code, err := daemon.DialDeny(daemon.DenyOptions{
+		code, err := daemon.NewClient().Deny(daemon.DenyOptions{
 			IP: ip,
 		})
 		if err != nil {
