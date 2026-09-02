@@ -23,14 +23,8 @@ func (c *Conn) Send(v any) error {
 	return c.enc.Encode(v)
 }
 
-func (c *Conn) Recieve(v any) error {
-	buf := make([]byte, 4096)
-	n, err := c.c.Read(buf)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(buf[:n], v)
-	// return c.dec.Decode(v)
+func (c *Conn) Receive(v any) error {
+	return c.dec.Decode(v)
 }
 
 func (c *Conn) Close() error {

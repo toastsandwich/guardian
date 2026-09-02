@@ -11,7 +11,7 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "detach from the interface and stop the guardian daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		code, err := daemon.DialStop()
+		code, err := daemon.NewClient().Stop()
 		if err != nil {
 			return err
 		}

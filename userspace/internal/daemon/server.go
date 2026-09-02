@@ -12,6 +12,13 @@ import (
 
 const path = "/tmp/guardian.sock"
 
+type Mode byte
+
+const (
+	SENTRY Mode = 0
+	MONK   Mode = 1
+)
+
 type Server struct {
 	ln   net.Listener
 	exec *Executor
@@ -88,7 +95,7 @@ func (s *Server) handleConn(c net.Conn) error {
 	}()
 
 	req := Request{}
-	if err := conn.Recieve(&req); err != nil {
+	if err := conn.Receive(&req); err != nil {
 		s.logger.Error("failed to receive request", "err", err, "duration", time.Since(start))
 		return err
 	}
@@ -105,7 +112,7 @@ func (s *Server) handleConn(c net.Conn) error {
 			return sendErr
 		}
 		logger.Info("sent error response", "code", codeString(resp.Code), "duration", time.Since(start))
-		return err
+		return nil
 	}
 
 	logger.Debug("dispatching command")
@@ -133,7 +140,7 @@ func (s *Server) handleConn(c net.Conn) error {
 		logger.Info("stop command received, shutting down")
 		s.isStarted.Store(false)
 	}
-	return err
+	return nil
 }
 
 func (s *Server) Close() {
